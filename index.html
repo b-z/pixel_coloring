@@ -1,0 +1,1111 @@
+<!doctype html>
+<html>
+
+<head>
+	<link type="text/css" rel="stylesheet" href="css/materialize.min.css" media="screen,projection" />
+	<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+	<title>
+	</title>
+
+	<style>
+		canvas {
+			/*position: absolute;*/
+			/*border: 1px dotted rgb(116, 191, 219);*/
+			cursor: none;
+			float: left;
+		}
+
+		canvas:focus {
+			outline: none;
+		}
+
+		input {
+			text-align: center;
+		}
+
+		body {
+			overflow: hidden;
+		}
+	</style>
+</head>
+
+<body class="blue lighten-5">
+	<script type="text/javascript" src="js/jquery-2.1.3.min.js"></script>
+	<script type="text/javascript" src="js/materialize.min.js"></script>
+	<div class="container" style="width:95%">
+		<div class="row">
+			<div class="col s12 m12 l8" id="canv_area">
+				<canvas id="canv" class="card-panel" tabindex="0" width="2048" height="2048" oncontextmenu=self.event.returnValue=false onselectstart="return false" style="padding:0;">Please use Chrome</canvas>
+			</div>
+			<div class="col s12 m12 l4">
+				<div class="card-panel">
+					<div id="button_area" style="margin-left:20px;">
+					</div>
+					<div style="margin-left:20px;">
+						<div class="btn white black-text waves-effect waves-red" onclick="selectPolygon(0);" style="margin-bottom:5px;">清除选中状态</div>
+						<br>
+						<div class="btn white black-text waves-effect" onclick="addInnerCycle();" style="margin-bottom:5px;">为选中多边形添加内环</div>
+						<br>
+						<div class="btn white black-text waves-effect waves-teal" onclick="selectCutPolygon();" style="margin-bottom:5px;">为选中多边形选择裁剪对象</div>
+						<br>
+						<div class="btn white black-text waves-effect waves-yellow" onclick="move();" style="margin-bottom:5px;">平移</div>
+						x:
+						<input value="0" id="movex" type="text" class="validate" style="width:15%;height:inherit;">格, y:
+						<input value="0" id="movey" type="text" class="validate" style="width:15%;height:inherit;">格
+						<br>
+						<div class="btn white black-text waves-effect waves-orange" onclick="rotate();" style="margin-bottom:5px;">旋转</div>
+						逆时针:
+						<input value="0" id="rotate" type="text" class="validate" style="width:30%;height:inherit;">度
+						<br>
+						<div class="btn white black-text waves-effect waves-purple" onclick="scale();" style="margin-bottom:5px;">缩放</div>
+						<input value="100" id="scale" type="text" class="validate" style="width:30%;height:inherit;">%
+						<br>
+						<div id="flipx" class="btn white black-text waves-effect waves-green" onclick="flipx();" style="margin-bottom:5px;">水平翻转</div>
+						<div id="flipy" class="btn white black-text waves-effect waves-yellow" onclick="flipy();" style="margin-bottom:5px;">垂直翻转</div>
+						<br>
+						<div style="margin:15px 0 15px 0" onclick="invalidate();">
+							<label>
+								<input type="checkbox" id="coloring" />
+								<label for="coloring">着色</label>
+							</label>
+						</div>
+						<div class="btn white black-text waves-effect waves-red" onclick="load('yes');" style="margin-bottom:5px;">重置所有多边形</div>
+
+
+					</div>
+				</div>
+				<div class="card-panel">
+
+					<p>鼠标点击左侧添加顶点，右键点击或者按下空格键封闭多边形。</p>
+					<p>添加多边形后，点击多边形对应按钮后可进一步对其操作: 添加内环、选择裁剪对象、平移旋转等。</p>
+					<p>平移也可通过键盘上下左右进行。旋转也可通过键盘shift+左右进行。缩放也可通过键盘shift+上下进行。</p>
+					<p>添加内环需要在canvas上继续选点; 选择裁剪对象操作需要再点击一个多边形作为目标多边形。</p>
+
+				</div>
+			</div>
+		</div>
+	</div>
+	<script type="text/javascript">
+		var canv = $('#canv')[0];
+		var ctx = canv.getContext('2d');
+		var rects, oldrects;
+		var rectSize = 16;
+		var size = 2048;
+		// var fillColor = 'rgb(140, 132, 247)';
+		var lineColor;
+		var drawingLineColor;
+		var vertexColor = 'rgb(228, 8, 108)';
+		var cursorColor = 'rgb(60,91,200)'
+		var lines = [];
+		var polygons = [];
+		var mousex, mousey;
+		var polygon_now = -1;
+		var addingInnerCycle = false;
+		var selectingCutPolygon = false;
+
+		var load = function(reload) {
+			$('#canv').height(Math.min($(window).innerHeight() - 50, $('#canv_area').width()) + 'px');
+			changeColor();
+			if (rects == undefined || reload == "yes") {
+				rects = [];
+				oldrects = [];
+				polygons = [];
+				lines = [];
+				polygon_now = -1;
+				addingInnerCycle = false;
+				selectingCutPolygon = false;
+				$('#button_area')[0].innerHTML = '';
+				for (var i = 0; i < size / rectSize; i++) {
+					var tmp = [],
+						tmp0 = [];
+					for (var j = 0; j < size / rectSize; j++) {
+						tmp.push('#fff');
+						tmp0.push('#fff');
+					}
+					rects.push(tmp);
+					oldrects.push(tmp0);
+				}
+			}
+			invalidate(true);
+		}
+
+		var changeColor = function() {
+			var tmpc = Math.round(360 * Math.random());
+			lineColor = 'hsl(' + tmpc + ',96%,36%)';
+			drawingLineColor = 'hsl(' + tmpc + ',100%,50%)';
+			// vertexColor = 'hsl(' + (tmpc + 90) % 360 + ',96%,26%)';
+		}
+
+		/**** Draw ****/
+
+		var invalidate = function(force) {
+			// ctx.clearRect(0, 0, size, size);
+			rects = [];
+			for (var i = 0; i < size / rectSize; i++) {
+				var tmp = [];
+				for (var j = 0; j < size / rectSize; j++) {
+					tmp.push('#fff');
+				}
+				rects.push(tmp);
+			}
+			colorLines();
+			if ($('#coloring')[0].checked) {
+				colorPolygons();
+			}
+			colorLinesNow();
+			colorCenterPoint();
+			colorCursor();
+			drawRects(force);
+			for (var i = 0; i < size / rectSize; i++) {
+				for (var j = 0; j < size / rectSize; j++) {
+					oldrects[i][j] = rects[i][j];
+				}
+			}
+		}
+
+		var drawRects = function(force) {
+			for (var i = 0; i < size / rectSize; i++) {
+				for (var j = 0; j < size / rectSize; j++) {
+					if (!force && rects[i][j] == oldrects[i][j]) {
+						continue;
+					}
+					var stroke = '#ddd';
+					var fill = rects[i][j];
+					drawRect(i * rectSize, j * rectSize, rectSize, rectSize, fill, stroke);
+				}
+			}
+		}
+
+		var drawRect = function(x, y, w, h, fill, stroke) {
+			ctx.save();
+			ctx.fillStyle = fill;
+			ctx.strokeStyle = stroke;
+			ctx.fillRect(x, y, w, h);
+			ctx.strokeRect(x, y, w, h);
+			ctx.restore();
+		}
+
+		var colorLines = function() {
+			var oldColor = lineColor;
+			for (var i = 0; i < polygons.length; i++) {
+				lineColor = polygons[i].c;
+				for (var j = 0; j < polygons[i].l.length; j++) {
+					_moveTo(polygons[i].l[j][0]);
+					_lineTo(polygons[i].l[j][1], polygons[i].c);
+				}
+			}
+			lineColor = oldColor;
+		}
+
+		var colorLinesNow = function() {
+			for (var i = 0; i < lines.length; i++) {
+				_moveTo(lines[i][0]);
+				_lineTo(lines[i][1], lines[i][2]);
+			}
+		}
+
+		var colorPolygons = function() {
+			var n = size / rectSize;
+			for (var i = 0; i < n; i++) {
+				for (var j = 0; j < n; j++) {
+					var p = inPolygon(i, j);
+					if (p >= 0) {
+						_setPixel(i, j, polygons[p].c);
+					}
+				}
+			}
+		}
+
+		var colorCenterPoint = function() {
+			if (polygon_now < 0) {
+				return;
+			}
+			var center = getCenter(polygon_now);
+			_setPixel(Math.round(center[0] - 1), Math.round(center[1] - 1), vertexColor);
+			_setPixel(Math.round(center[0] - 1), Math.round(center[1] + 1), vertexColor);
+			_setPixel(Math.round(center[0] + 1), Math.round(center[1] + 1), vertexColor);
+			_setPixel(Math.round(center[0] + 1), Math.round(center[1] - 1), vertexColor);
+			_setPixel(Math.round(center[0]), Math.round(center[1]), vertexColor);
+		}
+
+		var colorCursor = function() {
+			_setPixel(mousex, mousey, cursorColor);
+			_setPixel(mousex, mousey + 1, cursorColor);
+			_setPixel(mousex, mousey - 1, cursorColor);
+			_setPixel(mousex + 1, mousey, cursorColor);
+			_setPixel(mousex - 1, mousey, cursorColor);
+
+		}
+
+		var mult = function(a, b, c) {
+			return (a[0] - c[0]) * (b[1] - c[1]) - (b[0] - c[0]) * (a[1] - c[1]);
+		}
+
+		var isTwoLinesCross = function(li, lj) {
+			var xa1 = li[0][0];
+			var ya1 = li[0][1];
+			var xa2 = li[1][0];
+			var ya2 = li[1][1];
+			var xb1 = lj[0][0];
+			var yb1 = lj[0][1];
+			var xb2 = lj[1][0];
+			var yb2 = lj[1][1];
+			var max = Math.max,
+				min = Math.min;
+
+			if (max(xa1, xa2) < min(xb1, xb2) ||
+				max(ya1, ya2) < min(yb1, yb2) ||
+				max(xb1, xb2) < min(xa1, xa2) ||
+				max(yb1, yb2) < min(ya1, ya2) ||
+				mult(lj[0], li[1], li[0]) * mult(li[1], lj[1], li[0]) < 0 ||
+				mult(li[0], lj[1], lj[0]) * mult(lj[1], li[1], lj[0]) < 0) {
+				return false;
+			}
+			return true;
+		}
+
+		var checkCross = function() {
+			for (var i = 0; i < lines.length; i++) {
+				for (var j = 0; j < lines.length; j++) {
+					if (i != j) {
+						if (lines[i][0] == lines[j][0] || lines[i][0] == lines[j][1] || lines[i][1] == lines[j][0] || lines[i][1] == lines[j][1]) {
+							continue;
+						}
+						if (isTwoLinesCross(lines[i], lines[j])) {
+							return false;
+						}
+						continue;
+					}
+				}
+			}
+			return true;
+		}
+
+		var closePath = function() {
+			if (!mouseHolding || lines.length <= 2) return;
+
+			mouseHolding = false;
+			for (var i = lines.length - 1; i >= 0; i--) {
+				if (lines[i].length != 2) {
+					lines.splice(i, 1);
+				}
+			}
+			lines.push([lines[lines.length - 1][1], startPoint]);
+			if (!checkCross()) {
+				Materialize.toast('多边形自相交，请重新绘制!', 2000);
+				lines = [];
+				invalidate();
+				return;
+			}
+			// pointNow=lines[0][1];
+			if (addingInnerCycle) {
+				polygons[polygon_now].i = polygons[polygon_now].l.length;
+				lines = sortVertex(lines, false);
+				for (var e = 0; e < lines.length; e++) {
+					polygons[polygon_now].l.push(lines[e]);
+				}
+				addingInnerCycle = false;
+			} else {
+				polygons.push({
+					l: sortVertex(lines, true),
+					c: lineColor,
+					i: 0
+				});
+				$('#button_area').append('<div id="polygon' + polygons.length +
+					'" onclick="selectPolygon(' + polygons.length + ');" class="btn white" style="color:' + lineColor +
+					';margin-bottom:5px;">Polygon ' + polygons.length + '</div><br id="br_polygon' + polygons.length + '">');
+			}
+			lines = [];
+			changeColor();
+			invalidate();
+		}
+
+		var sortVertex = function(ls, direction) {
+			var s1 = 0,
+				s2 = 0;
+			for (var i = 0; i < ls.length; i++) {
+				var a = (i == 0 ? ls[ls.length - 1][0] : ls[i - 1][0]);
+				var b = ls[i][0];
+				var c = ls[i][1];
+				var s = (b[0] - a[0]) * (c[1] - b[1]) - (b[1] - a[1]) * (c[0] - b[0]);
+				if (s < 0) {
+					s1 += 1;
+				} else {
+					s2 += 1;
+				}
+			}
+			if ((s1 < s2 && direction) || (s1 > s2 && !direction)) {
+				var newl = [];
+				for (var i = 0; i < ls.length; i++) {
+					newl.push([ls[ls.length - i - 1][1], ls[ls.length - i - 1][0]]);
+				}
+				return newl;
+			}
+			return ls;
+		}
+
+		var selectPolygon = function(p) {
+			if (!selectingCutPolygon) {
+				$('[id^=polygon]').attr('class', 'btn white');
+				$('#polygon' + p).attr('class', 'btn blue lighten-4');
+				polygon_now = p - 1;
+			} else {
+				cutPolygon(polygon_now, p - 1);
+			}
+			invalidate();
+			// console.log(polygon_now);
+		}
+
+		/**** Coloring ****/
+
+		var pointNow = [0, 0];
+
+		var _setPixel = function(x, y, color) {
+			// if (x < 0 || y < 0 || x >= size / rectSize || y >= size / rectSize) return;
+			try {
+				rects[x][y] = color;
+			} catch (e) {
+				// console.log(x);
+			} finally {
+
+			}
+		}
+		var _moveTo = function(coord) {
+			pointNow = coord;
+		}
+		var _lineTo = function(coord, color) {
+			// console.log(coord);
+			if (color == undefined) {
+				color = lineColor;
+			}
+			var x1 = Math.round(pointNow[0]);
+			var y1 = Math.round(pointNow[1]);
+			var x2 = Math.round(coord[0]);
+			var y2 = Math.round(coord[1]);
+			// pointNow = coord;
+			var dx = x2 - x1;
+			var dy = y2 - y1;
+
+			if (!dx) {
+				for (var i = 1; i < Math.abs(dy); i++) {
+					_setPixel(x1, y1 + i * (dy > 0 ? 1 : -1), color);
+				}
+			} else if (!dy) {
+				for (var i = 1; i < Math.abs(dx); i++) {
+					_setPixel(x1 + i * (dx > 0 ? 1 : -1), y1, color);
+				}
+			} else {
+				if (dx < 0) {
+					dx *= -1;
+					dy *= -1;
+					var tmp;
+					tmp = x1;
+					x1 = x2;
+					x2 = tmp;
+					tmp = y1;
+					y1 = y2;
+					y2 = tmp;
+				}
+				var k = dy / dx;
+				var e = -0.5;
+				var u = (k > 0 ? 1 : -1);
+				var x = x1;
+				var y = y1;
+				if (Math.abs(k) <= 1) {
+					for (var i = 0; i <= dx; i++) {
+						_setPixel(x, y, color);
+						x++;
+						e += u * k;
+						if (e >= 0) {
+							y += u;
+							e--;
+						}
+					}
+				} else {
+					for (var i = 0; i <= dy * u; i++) {
+						_setPixel(x, y, color);
+						y += u;
+						e += 1 / k * u;
+						if (e >= 0) {
+							x++;
+							e--;
+						}
+					}
+				}
+
+			}
+
+			_setPixel(x1, y1, vertexColor);
+			_setPixel(x2, y2, vertexColor);
+			// invalidate();
+		}
+
+		/**** Event ****/
+
+		var mouseHolding = false;
+
+		var convertCoord = function(x, y) {
+			var mx = Math.floor((x - 10) / rectSize * size / $('#canv').width());
+			var my = Math.floor((y - 10) / rectSize * size / $('#canv').height());
+			mx = Math.max(0, Math.min(size / rectSize, mx));
+			my = Math.max(0, Math.min(size / rectSize, my));
+			return [mx, my];
+		}
+
+		var mouseMoveEvent = function(e) {
+			var c = convertCoord(e.x, e.y);
+			mousex = c[0];
+			mousey = c[1];
+			if (mouseHolding) {
+				if (lines.length) {
+					for (var i = lines.length - 1; i >= 0; i--) {
+						if (lines[i][2] != undefined) {
+							lines.splice(i, 1);
+						}
+					}
+					lines.push([pointNow, c, drawingLineColor]);
+				} else {
+					lines.push([pointNow, c, drawingLineColor]);
+				}
+			}
+			invalidate();
+		}
+		var mouseDownEvent = function(e) {
+			// var c = convertCoord(e.x, e.y);
+			// _moveTo(c);
+			// console.log(e);
+		}
+		var mouseUpEvent = function(e) {
+			if (e.button == 2) {
+				closePath();
+				return;
+			}
+			var c = convertCoord(e.x, e.y);
+			if (addingInnerCycle) {
+				if (!isIn(c[0], c[1], polygon_now)) {
+					Materialize.toast('点击位置位于多边形外!', 2000);
+					invalidate();
+					return;
+				}
+			}
+			if (!mouseHolding) {
+				mouseHolding = true;
+				startPoint = c;
+			} else {
+				lines.push([pointNow, c]);
+			}
+			_moveTo(c);
+			invalidate();
+			pointNow = c;
+		}
+		var keyUpEvent = function(e) {
+			switch (e.which) {
+				case 32:
+					closePath();
+					break;
+			}
+		}
+		var keyDownEvent = function(e) {
+			switch (e.which) {
+				case 38:
+					if (e.shiftKey) {
+						scale(105);
+					} else if (e.altKey) {
+						flipy();
+					} else {
+						move(0, -1);
+					}
+					break;
+				case 40:
+					if (e.shiftKey) {
+						scale(95);
+					} else if (e.altKey) {
+						flipy();
+					} else {
+						move(0, 1);
+					}
+					break;
+				case 37:
+					if (e.shiftKey) {
+						rotate(1);
+					} else if (e.altKey) {
+						flipx();
+					} else {
+						move(-1, 0);
+					}
+					break;
+				case 39:
+					if (e.shiftKey) {
+						rotate(-1);
+					} else if (e.altKey) {
+						flipx();
+					} else {
+						move(1, 0);
+					}
+					break;
+			}
+		}
+
+		window.addEventListener("DOMContentLoaded", load);
+		window.onresize = load;
+		canv.addEventListener('mousemove', mouseMoveEvent);
+		canv.addEventListener('mousedown', mouseDownEvent);
+		canv.addEventListener('mouseup', mouseUpEvent);
+		window.addEventListener('keyup', keyUpEvent);
+		window.addEventListener('keydown', keyDownEvent);
+
+		/*各种操作*/
+		var getCenter = function(idx) {
+			//求第idx个多边形的重心
+			var p = polygons[idx];
+			var a, cx, cy;
+			a = cx = cy = 0;
+			for (var i = 0; i < p.i; i++) {
+				u = p.l[i][0];
+				v = p.l[i][1];
+				a += u[0] * v[1] - v[0] * u[1];
+				cx += (u[0] + v[0]) * (u[0] * v[1] - v[0] * u[1]);
+				cy += (u[1] + v[1]) * (u[0] * v[1] - v[0] * u[1]);
+			}
+			for (var i = p.i; i < p.l.length; i++) {
+				u = p.l[i][0];
+				v = p.l[i][1];
+				a -= u[0] * v[1] - v[0] * u[1];
+				cx -= (u[0] + v[0]) * (u[0] * v[1] - v[0] * u[1]);
+				cy -= (u[1] + v[1]) * (u[0] * v[1] - v[0] * u[1]);
+			}
+			a /= 2;
+			cx /= 6 * a;
+			cy /= 6 * a;
+			return [cx, cy];
+		}
+
+		var checkPolygon = function() {
+			if (polygons.length == 1 && polygon_now < 0) {
+				selectPolygon(1);
+				return true;
+			}
+			if (polygon_now < 0) {
+				Materialize.toast('先选择目标多边形!', 2000);
+				return false;
+			}
+			return true;
+		}
+
+		var move = function(ux, uy) {
+			if (!checkPolygon()) {
+				return;
+			}
+			var p = polygons[polygon_now];
+			var x = (ux == undefined ? $('#movex').val() - 0 : ux);
+			var y = (uy == undefined ? $('#movey').val() - 0 : uy);
+			for (var i = 0; i < p.l.length; i++) {
+				p.l[i][0][0] += x;
+				p.l[i][0][1] += y;
+			}
+			invalidate();
+		}
+
+		var rotate = function(degree) {
+			if (degree == undefined) {
+				degree = $('#rotate').val();
+			}
+			if (!checkPolygon()) {
+				return;
+			}
+			var center = getCenter(polygon_now);
+			var p = polygons[polygon_now];
+			for (var i = 0; i < p.l.length; i++) {
+				var dx = p.l[i][0][0] - center[0];
+				var dy = p.l[i][0][1] - center[1];
+				var phi = -degree / 180 * Math.PI;
+				var cp = Math.cos(phi);
+				var sp = Math.sin(phi);
+				p.l[i][0][0] = center[0] + dx * cp - dy * sp;
+				p.l[i][0][1] = center[1] + dx * sp + dy * cp;
+			}
+			invalidate();
+		}
+
+		var flipx = function() {
+			if (!checkPolygon()) {
+				return;
+			}
+			center = getCenter(polygon_now);
+			p = polygons[polygon_now];
+			// console.log(p);
+			for (var i = 0; i < p.l.length; i++) {
+				p.l[i][0][0] = 2 * center[0] - p.l[i][0][0];
+			}
+			// console.log(p);
+			invalidate();
+		}
+
+		var flipy = function() {
+			if (!checkPolygon()) {
+				return;
+			}
+			var center = getCenter(polygon_now);
+			var p = polygons[polygon_now];
+			for (var i = 0; i < p.l.length; i++) {
+				p.l[i][0][1] = 2 * center[1] - p.l[i][0][1];
+			}
+			invalidate();
+		}
+
+		var scale = function(z) {
+			if (z == undefined) {
+				z = $('#scale').val();
+			}
+			if (!checkPolygon()) {
+				return;
+			}
+			var center = getCenter(polygon_now);
+			var p = polygons[polygon_now];
+			for (var i = 0; i < p.l.length; i++) {
+				var dx = p.l[i][0][0] - center[0];
+				var dy = p.l[i][0][1] - center[1];
+				// console.log(dx);
+				dx *= z / 100;
+				dy *= z / 100;
+				p.l[i][0][0] = center[0] + dx;
+				p.l[i][0][1] = center[1] + dy;
+			}
+			invalidate();
+		}
+
+		var addInnerCycle = function() {
+			if (checkPolygon()) {
+				if (polygons[polygon_now].i) {
+					Materialize.toast('目标多边形已有内环!', 2000);
+					return;
+				}
+				addingInnerCycle = true;
+			}
+		}
+
+		var arg = function(x, y) {
+			// 幅角
+			if (y != 0) {
+				return 2 * Math.atan(y / (x + Math.sqrt(x * x + y * y)));
+			}
+			return x > 0 ? 0 : Math.PI;
+		}
+
+		var getAngle = function(x1, y1, x2, y2) {
+			var a = arg(x2, y2) - arg(x1, y1);
+			if (a <= -Math.PI) a += 2 * Math.PI;
+			else if (a > Math.PI) a -= 2 * Math.PI;
+			return a;
+		}
+
+		var isIn = function(x, y, idx) {
+			var p = polygons[idx];
+			if (p.i) {
+				var res1, res2;
+				var sum = 0;
+				for (var i = 0; i < p.i; i++) {
+					var x1 = Math.round(p.l[i][0][0]) - x;
+					var y1 = Math.round(p.l[i][0][1]) - y;
+					var x2 = Math.round(p.l[i][1][0]) - x;
+					var y2 = Math.round(p.l[i][1][1]) - y;
+					if ((0 == x1 && 0 == y1) || (0 == x2 && 0 == y2)) {
+						return true;
+					}
+					sum += getAngle(x1, y1, x2, y2);
+				}
+				if (Math.abs(sum) < 1e-5)
+					res1 = false;
+				else
+					res1 = true;
+				sum = 0;
+				for (var i = p.i; i < p.l.length; i++) {
+					var x1 = Math.round(p.l[i][0][0]) - x;
+					var y1 = Math.round(p.l[i][0][1]) - y;
+					var x2 = Math.round(p.l[i][1][0]) - x;
+					var y2 = Math.round(p.l[i][1][1]) - y;
+					if ((0 == x1 && 0 == y1) || (0 == x2 && 0 == y2)) {
+						return true;
+					}
+					sum += getAngle(x1, y1, x2, y2);
+				}
+				if (Math.abs(sum) < 1e-5)
+					res2 = false;
+				else
+					res2 = true;
+				if (res1 && !res2) return true;
+				return false;
+			} else {
+				var sum = 0;
+				for (var i = 0; i < p.l.length; i++) {
+					var x1 = Math.round(p.l[i][0][0]) - x;
+					var y1 = Math.round(p.l[i][0][1]) - y;
+					var x2 = Math.round(p.l[i][1][0]) - x;
+					var y2 = Math.round(p.l[i][1][1]) - y;
+					if ((0 == x1 && 0 == y1) || (0 == x2 && 0 == y2)) {
+						return true;
+					}
+					sum += getAngle(x1, y1, x2, y2);
+				}
+				if (Math.abs(sum) < 1e-5) return false;
+				return true;
+			}
+		}
+
+		var inPolygon = function(x, y) {
+			for (var i = polygons.length - 1; i >= 0; i--) {
+				if (polygons[i].l.length == 0) continue;
+				if (isIn(x, y, i)) {
+					return i;
+				}
+			}
+			return -1;
+		}
+
+		var selectCutPolygon = function() {
+			if (!checkPolygon()) {
+				return;
+			}
+			Materialize.toast('请点击裁剪多边形对应的按钮', 1000);
+			selectingCutPolygon = true;
+		}
+
+		var getVertexList = function(p) {
+			var result = [];
+			if (p.i) {
+				for (var i = 0; i < p.i; i++) {
+					result.push({
+						p: p.l[i][0],
+						w: 'out'
+					});
+				}
+				result.push(result[0]);
+				for (var i = p.i; i < p.l.length; i++) {
+					result.push({
+						p: p.l[i][0],
+						w: 'in'
+					});
+				}
+				result.push({
+					p: p.l[p.l.length - 1][1],
+					w: 'in'
+				});
+			} else {
+				for (var i = 0; i < p.l.length; i++) {
+					result.push({
+						p: p.l[i][0],
+						w: 'out'
+					});
+				}
+				result.push(result[0]);
+			}
+			return result;
+		}
+
+		var crossPoint = function(l1, l2) {
+			var l1a = l1[0][1] - l1[1][1];
+			var l2a = l2[0][1] - l2[1][1];
+			var l1b = l1[1][0] - l1[0][0];
+			var l2b = l2[1][0] - l2[0][0];
+			var l1c = l1[0][0] * l1[1][1] - l1[1][0] * l1[0][1];
+			var l2c = l2[0][0] * l2[1][1] - l2[1][0] * l2[0][1];
+			var d = l1a * l2b - l2a * l1b;
+			return [(l1b * l2c - l2b * l1c) / d, (l2a * l1c - l1a * l2c) / d];
+		}
+
+		var sortCrossPoint = function(ls, p1, p2) {
+			if (p1[0] == p2[0]) {
+				for (var i = ls.length - 1; i >= 0; i--) {
+					for (var j = 0; j < i; j++) {
+						if ((ls[j].p[1] < ls[j + 1].p[1] && p1[1] > p2[1]) || (ls[j].p[1] > ls[j + 1].p[1] && p1[1] < p2[1])) {
+							var tmp = ls[j];
+							ls[j] = ls[j + 1];
+							ls[j + 1] = tmp;
+						}
+					}
+				}
+			} else {
+				// 对ls[i].p的x排序
+				for (var i = ls.length - 1; i >= 0; i--) {
+					for (var j = 0; j < i; j++) {
+						if ((ls[j].p[0] < ls[j + 1].p[0] && p1[0] > p2[0]) || (ls[j].p[0] > ls[j + 1].p[0] && p1[0] < p2[0])) {
+							var tmp = ls[j];
+							ls[j] = ls[j + 1];
+							ls[j + 1] = tmp;
+						}
+					}
+				}
+			}
+			return ls;
+		}
+
+		var cutPolygon = function(now, cut) {
+			if (now == cut) {
+				Materialize.toast('请选择不同的多边形', 2000);
+				return;
+			}
+			var src = polygons[now];
+			var dst = polygons[cut];
+
+			v1s = getVertexList(src);
+			v2s = getVertexList(dst);
+
+			var res1 = [];
+			var res2 = [];
+			var connect = [];
+			var count = 0;
+			for (var i = 0; i < v1s.length - 1; i++) {
+				res1.push(v1s[i]);
+				count++;
+				var tmp = [];
+				for (var j = 0; j < v2s.length - 1; j++) {
+					if (v1s[i].w == v1s[i + 1].w) {
+						if (v2s[j].w == v2s[j + 1].w) {
+							var l1 = [v1s[i].p, v1s[i + 1].p];
+							var l2 = [v2s[j].p, v2s[j + 1].p];
+							if (isTwoLinesCross(l1, l2)) {
+								var cp = crossPoint(l1, l2);
+								tmp.push({
+									p: cp,
+									l: [l1, l2]
+								});
+								// connect.push([count]);
+								count++;
+							}
+						}
+					}
+				}
+				tmp = sortCrossPoint(tmp, v1s[i].p, v1s[i + 1].p);
+				for (var j = 0; j < tmp.length; j++) {
+					res1.push(tmp[j]);
+				}
+			}
+			count = 0;
+			var count2 = 0;
+			res1.push(v1s[v1s.length - 1]);
+			for (var i = 0; i < v2s.length - 1; i++) {
+				res2.push(v2s[i]);
+				count++;
+				var tmp = [];
+				for (var j = 0; j < v1s.length - 1; j++) {
+					if (v2s[i].w == v2s[i + 1].w) {
+						if (v1s[j].w == v1s[j + 1].w) {
+							var l1 = [v1s[j].p, v1s[j + 1].p];
+							var l2 = [v2s[i].p, v2s[i + 1].p];
+							if (isTwoLinesCross(l1, l2)) {
+								var cp = crossPoint(l1, l2);
+								tmp.push({
+									p: cp,
+									l: [l1, l2]
+								});
+								// connect[count2][1] = count;
+								count2++;
+								count++;
+							}
+						}
+					}
+				}
+				tmp = sortCrossPoint(tmp, v2s[i].p, v2s[i + 1].p);
+				for (var j = 0; j < tmp.length; j++) {
+					res2.push(tmp[j]);
+				}
+			}
+			res2.push(v2s[v2s.length - 1]);
+			// get connect
+			for (var i = 0; i < res1.length; i++) {
+				for (var j = 0; j < res2.length; j++) {
+					if (res1[i].p[0] == res2[j].p[0] && res1[i].p[1] == res2[j].p[1]) {
+						connect.push([i, j]);
+					}
+				}
+			}
+
+
+			//isIn(x,y,idx)
+			if (!connect.length) {
+				if (isIn(src.l[0][0][0], src.l[0][0][0], cut)) {
+					//保留src
+					var tmp = {
+						l: [],
+						i: src.i,
+						c: src.c
+					};
+					for (var i = 0; i < src.l.length; i++) {
+						tmp.l.push(src.l[i]);
+					}
+				} else {
+					var tmp = {
+						l: [],
+						i: dst.i,
+						c: src.c
+					};
+					for (var i = 0; i < dst.l.length; i++) {
+						tmp.l.push(dst.l[i]);
+					}
+				}
+				polygons.push(tmp);
+				$('#button_area').append('<div id="polygon' + polygons.length +
+					'" onclick="selectPolygon(' + polygons.length + ');" class="btn white" style="color:' + tmp.c +
+					';margin-bottom:5px;">Polygon ' + polygons.length + '</div><br id="br_polygon' + polygons.length + '">');
+			} else {
+				// 标记出(0)入(1)点
+				var tmp = res1[connect[0][0] - 1];
+				// tmp在外面: connect[0][2]=1
+				if (isIn(tmp.p[0], tmp.p[1], cut)) {
+					connect[0][2] = 0;
+				} else {
+					connect[0][2] = 1;
+				}
+				for (var i = 1; i < connect.length; i++) {
+					connect[i][2] = 1 - connect[i - 1][2];
+				}
+				var fin = [];
+				var cycle_now = 0;
+				// var count=0;
+				while (true) {
+					// count++;
+					// if (count>10) break;
+					// console.log(cycle_now);
+					// console.log(connect);
+					fin.push(res1[connect[cycle_now][0]]);
+					var point_start = res1[connect[cycle_now][0]];
+					var status = 'connect';
+					var point_now = connect[cycle_now];
+					// console.log(res1);
+					// console.log(res2);
+					// console.log(connect);
+					//
+					// console.log(fin[0]);
+					var count = 0;
+					while (true) {
+						count++;
+						if (count > 50) break;
+						var pushed;
+						switch (status) {
+							case 'connect':
+								point_now[3] = 1;
+								if (point_now[2] == 1) {
+									point_now = (point_now[0] + 1) % res1.length;
+									var pushed = res1[point_now];
+									if (pushed.w == undefined) {
+										status = 'connect';
+										for (var t = 0; t < connect.length; t++) {
+											if (connect[t][0] == point_now) {
+												point_now = connect[t];
+												break;
+											}
+										}
+									} else {
+										status = 'src';
+									}
+								} else {
+									point_now = (point_now[1] + 1) % res2.length;
+									var pushed = res2[point_now];
+									if (pushed.w == undefined) {
+										status = 'connect';
+										for (var t = 0; t < connect.length; t++) {
+											if (connect[t][1] == point_now) {
+												point_now = connect[t];
+												break;
+											}
+										}
+									} else {
+										status = 'cut';
+									}
+								}
+								break;
+							case 'src':
+								point_now = (point_now + 1) % res1.length;
+								pushed = res1[point_now];
+								if (pushed.w == undefined) {
+									status = 'connect';
+									for (var t = 0; t < connect.length; t++) {
+										if (connect[t][0] == point_now) {
+											point_now = connect[t];
+											break;
+										}
+									}
+								}
+								break;
+							case 'cut':
+								point_now = (point_now + 1) % res2.length;
+								pushed = res2[point_now];
+								if (pushed.w == undefined) {
+									status = 'connect';
+									for (var t = 0; t < connect.length; t++) {
+										if (connect[t][1] == point_now) {
+											point_now = connect[t];
+											break;
+										}
+									}
+								}
+								break;
+						}
+						// console.log(status);
+						// console.log(point_now);
+						// console.log(pushed);
+						fin.push(pushed);
+						if (pushed.p[0] == point_start.p[0] && pushed.p[1] == point_start.p[1]) {
+							break;
+						}
+					}
+					var m = 0;
+					for (var i = 0; i < connect.length; i++) {
+						if (connect[i][3] == undefined) {
+							m = 1;
+							cycle_now = i;
+							break;
+						}
+					}
+					if (m == 0) {
+						break;
+					}
+				}
+				convertPoints(fin);
+			}
+
+
+			selectingCutPolygon = false;
+			$('#polygon' + (1 + cut)).css('display', 'none');
+			$('#br_polygon' + (1 + cut)).css('display', 'none');
+			polygons[cut].l = [];
+			$('#polygon' + (1 + now)).css('display', 'none');
+			$('#br_polygon' + (1 + now)).css('display', 'none');
+			polygons[now].l = [];
+			selectPolygon(0);
+		}
+
+		var convertPoints = function(ls) {
+			// console.log(ls);
+			var same = [];
+			for (var i = 0; i < ls.length; i++) {
+				for (var j = i + 1; j < ls.length; j++) {
+					if (ls[i].p[0] == ls[j].p[0] && ls[i].p[1] == ls[j].p[1]) {
+						same.push([i, j]);
+					}
+				}
+			}
+			for (var i = 0; i < same.length; i++) {
+				// console.log(same[i]);
+				var lines = [];
+				for (var j = same[i][0]; j < same[i][1]; j++) {
+					lines.push([ls[j].p, ls[j + 1].p]);
+				}
+				// console.log(lines);
+				lines[lines.length - 1][1] = lines[0][0];
+				changeColor();
+				polygons.push({
+					l: lines,
+					c: lineColor,
+					i: 0
+				});
+				$('#button_area').append('<div id="polygon' + polygons.length +
+					'" onclick="selectPolygon(' + polygons.length + ');" class="btn white" style="color:' + lineColor +
+					';margin-bottom:5px;">Polygon ' + polygons.length + '</div><br id="br_polygon' + polygons.length + '">');
+			}
+			changeColor();
+		}
+	</script>
+</body>
+
+</html>
