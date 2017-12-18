@@ -453,7 +453,7 @@
 		}
 
 		var mouseMoveEvent = function(e) {
-			var c = convertCoord(e.x, e.y);
+			var c = convertCoord(e.offsetX, e.offsetY);
 			mousex = c[0];
 			mousey = c[1];
 			if (mouseHolding) {
@@ -480,7 +480,7 @@
 				closePath();
 				return;
 			}
-			var c = convertCoord(e.x, e.y);
+			var c = convertCoord(e.offsetX, e.offsetY);
 			if (addingInnerCycle) {
 				if (!isIn(c[0], c[1], polygon_now)) {
 					Materialize.toast('点击位置位于多边形外!', 2000);
